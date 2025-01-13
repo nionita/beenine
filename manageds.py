@@ -133,6 +133,37 @@ def do_sample(args):
         for code, fen in sorted(samples):
             print(f'{code}: {fen}', file=f)
 
+'''
+Filter pawn endings
+'''
+def do_pawns(args):
+    print(f'Filter pawn endings in {args.dir}:')
+    outrecs = 0
+    with open(args.out, 'w') as f:
+        for line_info in data_generator(root_dir=args.dir):
+            mp = line_info['moving_part']
+            if len(mp) == 5:
+                pp = line_info['passive_part']
+                if len(pp) == 5 and mp[0] > 0 and mp[1] == 0 and mp[2] == 0 and mp[3] == 0 and mp[4] == 0 \
+                        and pp[0] > 0 and pp[1] == 0 and pp[2] == 0 and pp[3] == 0 and pp[4] == 0:
+                            print(line_info['line'], file=f)
+                            outrecs += 1
+                            if args.number > 0 and outrecs >= args.number:
+                                break
+
+            # Report progress
+            rn = line_info['rec_no']
+            if args.progress > 0 and rn % args.progress == 0:
+                fn = line_info['file_name']
+                ln = line_info['line_no']
+                print(f'Record {rn}, file {fn}, line {ln}, written: {outrecs}')
+
+            # Limit the input
+            if args.limit > 0 and rn >= args.limit:
+                break
+
+    print(f'Total: {outrecs} positions written')
+
 # Parse command line arguments
 parser = argparse.ArgumentParser(
             prog='manageds',
@@ -149,5 +180,8 @@ parser_sample = subparsers.add_parser('sample')
 parser_sample.add_argument('-s', '--side', required=True, help='side sample to search for')
 parser_sample.add_argument('-n', '--number', type=int, default=0, help='number of samples (default: all)')
 parser_sample.set_defaults(func=do_sample)
+parser_pawns = subparsers.add_parser('pawns')
+parser_pawns.add_argument('-n', '--number', type=int, default=0, help='number of records (default: all)')
+parser_pawns.set_defaults(func=do_pawns)
 args = parser.parse_args()
 args.func(args)
