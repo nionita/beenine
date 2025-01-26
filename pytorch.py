@@ -14,6 +14,9 @@ base_dir = 'E:\\extract\\2025\\test-1'
 train_dir = os.path.join(base_dir, 'train')
 test_dir = os.path.join(base_dir, 'test')
 
+# Workers for the datasets
+WORKERS = 4
+
 # Why do we need to scale the network score prediction? It seems that
 # this is necessary in order to keep weigths & biases small,
 # so we chose a scale of 1000 - see PRED_SCALE
@@ -29,7 +32,7 @@ PRED_SIGMOID_SCALE = PRED_SCALE * SCORE_SIGMOID_SCALE
 
 # For the model:
 NUM_INPUTS = 30
-L1 = 10
+L1 = 64
 
 def pandas_2_torch(ds):
     return torch.tensor(ds.values.astype(np.float32))
@@ -91,11 +94,12 @@ def train(device, dataloader, model, loss_fn, optimizer):
         optimizer.step()
         optimizer.zero_grad()
 
-        if (batch_no + 1) % 100 == 0:
+        if (batch_no + 1) % 200 == 0:
             tdiff = time.time() - start
             spb = tdiff / (batch_no + 1)
+            nows = time.strftime('%X %x')
             loss, current = loss.item(), (batch_no + 1) * len(X)
-            print(f"loss: {loss:>7f} [{current:>7d}/{size:>7d}] {time.strftime('%X %x')}: {spb:>6f} second/batch")
+            print(f"loss: {loss:>7f} [{current:>7d}/{size:>7d}] {nows}: {spb:>6f} seconds/batch")
 
 def test(device, dataloader, model, loss_fn):
     size = len(dataloader.dataset)
@@ -109,6 +113,7 @@ def test(device, dataloader, model, loss_fn):
             test_loss += loss_fn(pred, y).item()
     test_loss /= num_batches
     print(f"Test Error Avg loss: {test_loss:>8f} \n")
+    return test_loss
 
 def main():
     # Training data
@@ -125,7 +130,7 @@ def main():
     #)
     test_data = MemmapDataset(test_dir)
 
-    batch_size = 128
+    batch_size = 256
 
     # Create data loaders.
     train_dataloader = DataLoader(
@@ -133,12 +138,13 @@ def main():
             batch_size=batch_size,
             shuffle=True,
             drop_last=True,
-            num_workers=3,
+            num_workers=WORKERS,
             pin_memory=False
         )
     test_dataloader = DataLoader(
             test_data,
             batch_size=batch_size,
+            num_workers=WORKERS,
             pin_memory=False
         )
 
@@ -164,15 +170,18 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
     epochs = 5
+    test_losses = []
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
         train(device, train_dataloader, model, loss_fn, optimizer)
-        test(device, test_dataloader, model, loss_fn)
-    print("Done!")
+        save_name = f"model3-{t}.pth"
+        torch.save(model.state_dict(), save_name)
+        print(f"Saved PyTorch Model State to {save_name}")
+        test_loss = test(device, test_dataloader, model, loss_fn)
+        test_losses.append(test_loss)
 
-    save_name = "model2.pth"
-    torch.save(model.state_dict(), save_name)
-    print(f"Saved PyTorch Model State to {save_name}")
+    print(f"Test losses: {test_losses}")
+    print("Done!")
 
 if __name__ == '__main__':
     main()
