@@ -36,21 +36,28 @@ PRED_SIGMOID_SCALE = PRED_SCALE * SCORE_SIGMOID_SCALE
 # For the model:
 NUM_INPUTS = 384
 L1 = 128
+L2 = 128
 
 # Define model - the correct one
 class BBNNc(nn.Module):
     def __init__(self):
         super().__init__()
-        self.input  = nn.Linear(NUM_INPUTS, L1)
-        self.output = nn.Linear(2 * L1, 1)
+        self.side = nn.Linear(NUM_INPUTS, L1)
+        self.inte = nn.Linear(2 * L1, L2)
+        self.outp = nn.Linear(L2, 1, bias=False)
 
-    def forward(self, us, them, w_in, b_in):
-        w  = self.input(w_in)
-        b  = self.input(b_in)
-        l0 = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
-        l0 = torch.clamp(l0, 0.0, 1.0)
-        x  = self.output(l0)
-        return x
+    def forward(self, x):
+        # Active / passive side input representation
+        a_in, p_in = torch.tensor_split(x, 2, dim=1)
+        a   = self.side(a_in)
+        p   = self.side(p_in)
+        c   = torch.cat([a, p], dim=1)
+        # l0a = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
+        l0  = torch.clamp(c, 0.0, 1.0)
+        i   = self.inte(l0)
+        l1  = torch.clamp(i, 0.0, 1.0)
+        y   = self.outp(l1)
+        return y
 
 # Define model - only test
 class BBNN(nn.Module):
@@ -150,10 +157,10 @@ def main():
         )
 
     # Just an info:
-    for X, y in test_dataloader:
-        print(f"Shape of X [N, F]: {X.shape} {X.dtype}")
-        print(f"Shape of y:        {y.shape} {y.dtype}")
-        break
+    #for X, y in test_dataloader:
+    #    print(f"Shape of X [N, F]: {X.shape} {X.dtype}")
+    #    print(f"Shape of y:        {y.shape} {y.dtype}")
+    #    break
 
     # Get cpu, gpu or mps device for training.
     device = (
@@ -165,20 +172,25 @@ def main():
     )
     print(f"Using {device} device")
 
-    model = BBNN().to(device)
+    model = BBNNc().to(device)
     print(model)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
-    epochs = 5
-    test_losses = []
+    epochs = 10
     num_batches_train = int(train_pos / batch_size)
     num_batches_test  = int(test_pos / batch_size)
+
+    test_losses = []
+
+    # First evaluation: completely random - for comparison
+    test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
+    test_losses.append(test_loss)
 
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
         train(device, train_dataloader, model, loss_fn, optimizer, num_batches=num_batches_train)
-        save_name = f"model3-{t}.pth"
+        save_name = f"model4-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
         test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
