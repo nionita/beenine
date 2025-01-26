@@ -7,15 +7,18 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-# from bbnn_dataset import BBNNDataset
-from mmap_dataset import MemmapDataset
+from bbnn_dataset import BBNNDataset
+#from mmap_dataset import MemmapDataset
 
-base_dir = 'E:\\extract\\2025\\test-1'
+base_dir  = 'E:\\extract\\2025\\test-1'
 train_dir = os.path.join(base_dir, 'train')
-test_dir = os.path.join(base_dir, 'test')
+test_dir  = os.path.join(base_dir, 'test')
+
+train_pos = 10_423_404
+test_pos  =  1_000_000
 
 # Workers for the datasets
-WORKERS = 4
+WORKERS = None
 
 # Why do we need to scale the network score prediction? It seems that
 # this is necessary in order to keep weigths & biases small,
@@ -31,11 +34,8 @@ SCORE_SIGMOID_SCALE = 1.0 / 150.0
 PRED_SIGMOID_SCALE = PRED_SCALE * SCORE_SIGMOID_SCALE
 
 # For the model:
-NUM_INPUTS = 30
-L1 = 64
-
-def pandas_2_torch(ds):
-    return torch.tensor(ds.values.astype(np.float32))
+NUM_INPUTS = 384
+L1 = 128
 
 # Define model - the correct one
 class BBNNc(nn.Module):
@@ -56,8 +56,8 @@ class BBNNc(nn.Module):
 class BBNN(nn.Module):
     def __init__(self):
         super().__init__()
-        self.input  = nn.Linear(NUM_INPUTS, L1)
-        self.output = nn.Linear(L1, 1)
+        self.input  = nn.Linear(NUM_INPUTS * 2, L1)
+        self.output = nn.Linear(L1, 1, bias=False)
 
     def forward(self, x):
         w  = self.input(x)
@@ -78,12 +78,16 @@ def loss_fn(pred, y, batch_no = 0):
 
     return mloss
 
-def train(device, dataloader, model, loss_fn, optimizer):
-    size = len(dataloader.dataset)
-    model.train()
+def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
+    print(f'Begin train on {device} with {num_batches}')
+    #size = len(dataloader.dataset)
     start = time.time()
-    for batch_no, (X, y) in enumerate(dataloader):
+    model.train()
+    batch_no = 0
+    for X, y in dataloader:
+        batch_no += 1
         X, y = X.to(device), y.to(device)
+        # print(f'Batch {batch_no}: {X} -> {y}')
 
         # Compute prediction error
         pred = model(X)
@@ -94,41 +98,40 @@ def train(device, dataloader, model, loss_fn, optimizer):
         optimizer.step()
         optimizer.zero_grad()
 
-        if (batch_no + 1) % 200 == 0:
+        if batch_no % 1000 == 0:
             tdiff = time.time() - start
             spb = tdiff / (batch_no + 1)
             nows = time.strftime('%X %x')
-            loss, current = loss.item(), (batch_no + 1) * len(X)
+            loss, current = loss.item(), batch_no * len(X)
+            size = num_batches * len(X)
             print(f"loss: {loss:>7f} [{current:>7d}/{size:>7d}] {nows}: {spb:>6f} seconds/batch")
+        if batch_no >= num_batches:
+            return
 
-def test(device, dataloader, model, loss_fn):
-    size = len(dataloader.dataset)
-    num_batches = len(dataloader)
+def test(device, dataloader, model, loss_fn, num_batches=10):
     model.eval()
     test_loss = 0
     with torch.no_grad():
+        batch_no = 0
         for X, y in dataloader:
+            batch_no += 1
             X, y = X.to(device), y.to(device)
             pred = model(X)
             test_loss += loss_fn(pred, y).item()
+            if batch_no >= num_batches:
+                break
     test_loss /= num_batches
     print(f"Test Error Avg loss: {test_loss:>8f} \n")
     return test_loss
 
 def main():
     # Training data
-    #training_data = BBNNDataset(train_dir,
-    #    transform=pandas_2_torch,
-    #    target_transform=pandas_2_torch,
-    #)
-    training_data = MemmapDataset(train_dir)
+    training_data = BBNNDataset(train_dir)
+    #training_data = MemmapDataset(train_dir)
 
     # Test data
-    #test_data = BBNNDataset(test_dir,
-    #    transform=pandas_2_torch,
-    #    target_transform=pandas_2_torch,
-    #)
-    test_data = MemmapDataset(test_dir)
+    test_data = BBNNDataset(test_dir)
+    #test_data = MemmapDataset(test_dir)
 
     batch_size = 256
 
@@ -136,22 +139,20 @@ def main():
     train_dataloader = DataLoader(
             training_data,
             batch_size=batch_size,
-            shuffle=True,
-            drop_last=True,
-            num_workers=WORKERS,
+            #num_workers=WORKERS,
             pin_memory=False
         )
     test_dataloader = DataLoader(
             test_data,
             batch_size=batch_size,
-            num_workers=WORKERS,
+            #num_workers=WORKERS,
             pin_memory=False
         )
 
     # Just an info:
     for X, y in test_dataloader:
-        print(f"Shape of X [N, C]: {X.shape}")
-        print(f"Shape of y: {y.shape} {y.dtype}")
+        print(f"Shape of X [N, F]: {X.shape} {X.dtype}")
+        print(f"Shape of y:        {y.shape} {y.dtype}")
         break
 
     # Get cpu, gpu or mps device for training.
@@ -171,13 +172,16 @@ def main():
 
     epochs = 5
     test_losses = []
+    num_batches_train = int(train_pos / batch_size)
+    num_batches_test  = int(test_pos / batch_size)
+
     for t in range(epochs):
         print(f"Epoch {t+1}\n-------------------------------")
-        train(device, train_dataloader, model, loss_fn, optimizer)
+        train(device, train_dataloader, model, loss_fn, optimizer, num_batches=num_batches_train)
         save_name = f"model3-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
-        test_loss = test(device, test_dataloader, model, loss_fn)
+        test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
         test_losses.append(test_loss)
 
     print(f"Test losses: {test_losses}")
