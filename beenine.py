@@ -1,9 +1,11 @@
 # vim: ts=4 sw=4 et
 
+import argparse
 import os.path
 import numpy as np
 import time
 import torch
+import sys
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -131,36 +133,26 @@ def test(device, dataloader, model, loss_fn, num_batches=10):
     print(f"Test Error Avg loss: {test_loss:>8f} \n")
     return test_loss
 
-def main():
+def main_train(args):
     # Training data
     training_data = BBNNDataset(train_dir)
-    #training_data = MemmapDataset(train_dir)
 
     # Test data
     test_data = BBNNDataset(test_dir)
-    #test_data = MemmapDataset(test_dir)
 
-    batch_size = 256
+    batch_size = args['batch']
 
     # Create data loaders.
     train_dataloader = DataLoader(
             training_data,
             batch_size=batch_size,
-            #num_workers=WORKERS,
             pin_memory=False
         )
     test_dataloader = DataLoader(
             test_data,
             batch_size=batch_size,
-            #num_workers=WORKERS,
             pin_memory=False
         )
-
-    # Just an info:
-    #for X, y in test_dataloader:
-    #    print(f"Shape of X [N, F]: {X.shape} {X.dtype}")
-    #    print(f"Shape of y:        {y.shape} {y.dtype}")
-    #    break
 
     # Get cpu, gpu or mps device for training.
     device = (
@@ -172,12 +164,17 @@ def main():
     )
     print(f"Using {device} device")
 
-    model = BBNNc().to(device)
+    model = BBNNc()
+    if 'restore' in args and args['restore'] is not None:
+        print(f'Restore model weights from {args["restore"]}')
+        model.load_state_dict(torch.load(args['restore'], weights_only=True))
+
+    model = model.to(device)
     print(model)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
 
-    epochs = 10
+    epochs = args['epochs']
     num_batches_train = int(train_pos / batch_size)
     num_batches_test  = int(test_pos / batch_size)
 
@@ -188,9 +185,9 @@ def main():
     test_losses.append(test_loss)
 
     for t in range(epochs):
-        print(f"Epoch {t+1}\n-------------------------------")
+        print(f"Epoch {t+1} from {epochs}\n-------------------------------")
         train(device, train_dataloader, model, loss_fn, optimizer, num_batches=num_batches_train)
-        save_name = f"model4-{t}.pth"
+        save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
         test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
@@ -199,5 +196,20 @@ def main():
     print(f"Test losses: {test_losses}")
     print("Done!")
 
+def arg_parser():
+    parser = argparse.ArgumentParser(prog='beenine', description='Train BeeNiNe')
+    subparsers = parser.add_subparsers(dest='command', help='subcommand help')
+    parser_train = subparsers.add_parser('train', help='train the network')
+    parser_train.add_argument('-e', '--epochs', type=int, default=10, help='epochs to train')
+    parser_train.add_argument('-l', '--rate', type=float, default=0.001, help='learning rate')
+    parser_train.add_argument('-m', '--momentum', type=float, default=0, help='momentum for SGD')
+    parser_train.add_argument('-b', '--batch', type=int, default=256, help='bach size')
+    parser_train.add_argument('-r', '--restore', help='restore model params from file')
+    parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
+    parser_train.set_defaults(func=main_train)
+    return parser
+
 if __name__ == '__main__':
-    main()
+    parser = arg_parser()
+    args = parser.parse_args()
+    args.func(vars(args))
