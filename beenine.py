@@ -16,9 +16,6 @@ base_dir  = 'C:\\data\\extract\\2025\\beenine'
 train_dir = os.path.join(base_dir, 'train')
 test_dir  = os.path.join(base_dir, 'test')
 
-train_pos = 10_423_404
-test_pos  =  1_000_000
-
 # Workers for the datasets
 WORKERS = None
 
@@ -87,9 +84,8 @@ def loss_fn(pred, y, batch_no = 0):
 
     return mloss
 
-def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
-    print(f'Train on {device} with {num_batches} batches')
-    #size = len(dataloader.dataset)
+def train(device, dataloader, model, loss_fn, optimizer, train_pos):
+    print(f'Train on {device} with {train_pos} positions')
     start = time.time()
     train_inst = 0
     train_loss = 0
@@ -101,7 +97,7 @@ def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
         n = X.shape[0]
         train_inst += n
         if batch_report is None:
-            batch_report = int(2000000 / n)
+            batch_report = int(200000 / n)
         X, y = X.to(device), y.to(device)
         # print(f'Batch {batch_no}: {X} -> {y}')
 
@@ -120,16 +116,14 @@ def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
             ips = round(train_inst / tdiff)
             nows = time.strftime('%X %x')
             mloss = train_loss / train_inst
-            size = num_batches * n
-            print(f"loss: {mloss:>7f} [{train_inst:>7d}/{size:>7d}] {nows}: {ips:>6d} samples/second")
+            print(f"loss: {mloss:>7f} [{train_inst:>7d}/{train_pos:>7d}] {nows}: {ips:>6d} samples/second")
 
-        if batch_no >= num_batches:
-            nows = time.strftime('%X %x')
-            mloss = train_loss / train_inst
-            print(f"Epoch loss: {mloss:>7f} [{train_inst:>7d}/{train_inst:>7d}] {nows}")
-            return mloss
+    nows = time.strftime('%X %x')
+    mloss = train_loss / train_inst
+    print(f"Epoch loss: {mloss:>7f} [{train_inst:>7d}/{train_inst:>7d}] {nows}")
+    return train_inst, mloss
 
-def test(device, dataloader, model, loss_fn, num_batches=10):
+def test(device, dataloader, model, loss_fn):
     model.eval()
     test_inst = 0
     test_loss = 0
@@ -142,8 +136,7 @@ def test(device, dataloader, model, loss_fn, num_batches=10):
             pred = model(X)
             test_loss += loss_fn(pred, y).item() * n
             test_inst += n
-            if batch_no >= num_batches:
-                break
+
     test_loss /= test_inst
     print(f"Test Error Avg loss: {test_loss:>8f} \n")
     return test_loss
@@ -191,26 +184,25 @@ def main_train(args):
     optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
 
     epochs = args['epochs']
-    num_batches_train = int(train_pos / batch_size)
-    num_batches_test  = int(test_pos / batch_size)
 
     train_losses = []
     test_losses = []
 
     # First evaluation: completely random - for comparison
-    test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
+    test_loss = test(device, test_dataloader, model, loss_fn)
     test_losses.append(test_loss)
 
+    train_pos = 0
     start = time.time()
 
     for t in range(epochs):
         print(f"Epoch {t+1} from {epochs}\n-------------------------------")
-        train_loss = train(device, train_dataloader, model, loss_fn, optimizer, num_batches=num_batches_train)
+        train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
         train_losses.append(train_loss)
         save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
-        test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
+        test_loss = test(device, test_dataloader, model, loss_fn)
         test_losses.append(test_loss)
 
         tdiff = time.time() - start

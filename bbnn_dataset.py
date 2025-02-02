@@ -23,11 +23,6 @@ class BBNNDataset(IterableDataset):
         assert len(self.targ_files) != 0
         assert len(self.feat_files) == len(self.targ_files)
 
-        self.ds_feats = None
-        self.ds_targs = None
-        self.cur_idx  = None
-        self.cur_file = None
-
     def filenames(self, data_dir, pat):
         found = []
         #print(f'filenames in {data_dir} with {pat}')
@@ -36,81 +31,65 @@ class BBNNDataset(IterableDataset):
             found.append(abs_name)
         return found
 
-    def read_file(self, file_name):
-        print(f'DS: read new data file {file_name}')
-        arrs = []
-        with open(file_name, 'r') as f:
-            for line in f:
-                arrs.append(np.fromstring(line, dtype=int, sep=','))
-        # print(f'DS: got {len(arrs)} records')
-        return arrs
+    #    targ = self.ds_targs[self.cur_idx][0].astype(np.float32) # only score for now
+
+    def __iter__(self):
+        iterator = FileIterator(self.feat_files, self.targ_files)
+        return iterator
+
+class FileIterator():
+    def __init__(self, feature_files, target_files):
+        self.feature_files = feature_files
+        self.target_files = target_files
+        self.feo_file = None
+        self.tao_file = None
+        self.cur_file = None
 
     def __next__(self):
-        #print('DS: __next__ call')
-        new_file = False
-        if self.ds_feats is None:
-            #print('DS: __next__ 1')
-            new_file = True
-            self.cur_file = 0
-        elif self.cur_idx >= len(self.ds_feats):
-            #print('DS: __next__ 2')
-            new_file = True
-            self.cur_file += 1
-            if self.cur_file >= len(self.feat_files):
-                #print('DS: __next__ 3')
+        # It would work even with empty files
+        # Because we have features and target, the shorter file will terminate
+        # that pair and begin read from the next pair
+        while True:
+            new_file = False
+            if self.feo_file is None:
+                assert self.tao_file is None
                 self.cur_file = 0
-        if new_file:
-            #print('DS: __next__ 4')
-            self.cur_idx = 0
-            self.ds_feats = None
-            self.ds_targs = None
-            self.ds_feats = self.read_file(self.feat_files[self.cur_file])
-            self.ds_targs = self.read_file(self.targ_files[self.cur_file])
+                new_file = True
+            else:
+                try:
+                    fe_line = next(self.feo_file)
+                    ta_line = next(self.tao_file)
+                except StopIteration:
+                    self.cur_file += 1
+                    if self.cur_file >= len(self.feature_files):
+                        raise StopIteration
+                    new_file = True
+            if new_file:
+                if self.feo_file is not None:
+                    self.feo_file.close()
+                    self.tao_file.close()
+                print(f'Open feature file {self.feature_files[self.cur_file]}')
+                self.feo_file = open(self.feature_files[self.cur_file], 'r')
+                print(f'Open target  file {self.target_files[self.cur_file]}')
+                self.tao_file = open(self.target_files[self.cur_file], 'r')
+            else:
+                break
 
-        # Yield the current record and increase current index
         # We must set 1 on the feature indices
-        feix = self.ds_feats[self.cur_idx]
+        feix = np.fromstring(fe_line, dtype=int, sep=',')
         feat = np.zeros(FEATURE_LEN, dtype=np.float32)
         feat[feix] = 1.0
-        targ = self.ds_targs[self.cur_idx][0].astype(np.float32) # only score for now
-        self.cur_idx += 1
-        #print('DS: __next__ 5')
+        targ = np.fromstring(ta_line, dtype=np.float32, sep=',')[0]
         return torch.as_tensor(feat), torch.as_tensor(targ)
-
-    def __iter__(self):
-        return self
-
-class FileLinesDS(IterableDataset):
-    def __init__(self, data_file):
-        super().__init__()
-        self.data_file = data_file
-
-    def __iter__(self):
-        self.of = open(data_file, 'r')
-        return iter(self.of)
-
-class TargetFileDS(FileLinesDS):
-    def __init__(self, data_file):
-        super().__init__(data_file)
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        line = super().__next__(self)
-        return np.fromstring(line, dtype=int, sep=',')
-
 
 if __name__ == '__main__':
     print('Test dataset')
-    train_dir = 'C:\\data\\extract\\2025\\test-1\\train'
-    target_file_name = 'xai-targ.txt'
-    target_file_path = os.path.join(train_dir, target_file_name)
-    tds = TargetFileDS(target_file_path)
+    train_dir = 'C:\\data\\extract\\2025\\beenine\\train'
+    tds = BBNNDataset(train_dir)
     i = 0
     for y in tds:
         print(f'{y}')
         #print(f'Shapes: {X.shape} {X.type} {y.shape} {y.type}')
         i += 1
-        if i > 10:
+        if i >= 2:
             break
