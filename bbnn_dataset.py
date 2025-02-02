@@ -75,18 +75,41 @@ class BBNNDataset(IterableDataset):
         targ = self.ds_targs[self.cur_idx][0].astype(np.float32) # only score for now
         self.cur_idx += 1
         #print('DS: __next__ 5')
-        return torch.tensor(feat), torch.tensor(targ)
+        return torch.as_tensor(feat), torch.as_tensor(targ)
 
     def __iter__(self):
         return self
 
+class FileLinesDS(IterableDataset):
+    def __init__(self, data_file):
+        super().__init__()
+        self.data_file = data_file
+
+    def __iter__(self):
+        self.of = open(data_file, 'r')
+        return iter(self.of)
+
+class TargetFileDS(FileLinesDS):
+    def __init__(self, data_file):
+        super().__init__(data_file)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = super().__next__(self)
+        return np.fromstring(line, dtype=int, sep=',')
+
+
 if __name__ == '__main__':
     print('Test dataset')
-    train_dir = 'E:\\extract\\2025\\test-1\\train'
-    tds = BBNNDataset(train_dir)
+    train_dir = 'C:\\data\\extract\\2025\\test-1\\train'
+    target_file_name = 'xai-targ.txt'
+    target_file_path = os.path.join(train_dir, target_file_name)
+    tds = TargetFileDS(target_file_path)
     i = 0
-    for X, y in tds:
-        print(f'{X} -> {y}')
+    for y in tds:
+        print(f'{y}')
         #print(f'Shapes: {X.shape} {X.type} {y.shape} {y.type}')
         i += 1
         if i > 10:

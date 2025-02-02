@@ -98,16 +98,17 @@ def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
     batch_no = 0
     for X, y in dataloader:
         batch_no += 1
-        train_inst += len(X)
+        n = X.shape[0]
+        train_inst += n
         if batch_report is None:
-            batch_report = int(200000 / train_inst)
+            batch_report = int(2000000 / n)
         X, y = X.to(device), y.to(device)
         # print(f'Batch {batch_no}: {X} -> {y}')
 
         # Compute prediction error
         pred = model(X)
         loss = loss_fn(pred, y, batch_no)
-        train_loss += loss.item() * len(X)
+        train_loss += loss.item() * n
 
         # Backpropagation
         loss.backward()
@@ -119,7 +120,7 @@ def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
             ips = round(train_inst / tdiff)
             nows = time.strftime('%X %x')
             mloss = train_loss / train_inst
-            size = num_batches * len(X)
+            size = num_batches * n
             print(f"loss: {mloss:>7f} [{train_inst:>7d}/{size:>7d}] {nows}: {ips:>6d} samples/second")
 
         if batch_no >= num_batches:
@@ -136,10 +137,11 @@ def test(device, dataloader, model, loss_fn, num_batches=10):
         batch_no = 0
         for X, y in dataloader:
             batch_no += 1
+            n = X.shape[0]
             X, y = X.to(device), y.to(device)
             pred = model(X)
-            test_loss += loss_fn(pred, y).item() * len(X)
-            test_inst += len(X)
+            test_loss += loss_fn(pred, y).item() * n
+            test_inst += n
             if batch_no >= num_batches:
                 break
     test_loss /= test_inst
@@ -211,13 +213,14 @@ def main_train(args):
         test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
         test_losses.append(test_loss)
 
+        tdiff = time.time() - start
+        spe = tdiff / (t + 1)
+        rem = round((epochs - t - 1) * spe)
         if t + 1 < epochs:
-            tdiff = time.time() - start
-            spe = tdiff / (t + 1)
-            rem = round((epochs - t - 1) * spe)
             spe = round(spe)
             print(f"{spe} seconds per epoch - {rem} seconds remaining\n-------------------------------")
 
+    print(f"Done after {tdiff} seconds")
     print(f"Train/test losses:")
     for i in range(len(test_losses)):
         if i == 0:
