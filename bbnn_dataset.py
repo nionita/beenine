@@ -4,6 +4,7 @@ import os.path
 import numpy as np
 #import pandas as pd
 import glob
+import torch
 
 from torch.utils.data import IterableDataset
 
@@ -41,7 +42,7 @@ class BBNNDataset(IterableDataset):
         with open(file_name, 'r') as f:
             for line in f:
                 arrs.append(np.fromstring(line, dtype=int, sep=','))
-        print(f'DS: got {len(arrs)} records')
+        # print(f'DS: got {len(arrs)} records')
         return arrs
 
     def __next__(self):
@@ -74,7 +75,7 @@ class BBNNDataset(IterableDataset):
         targ = self.ds_targs[self.cur_idx][0].astype(np.float32) # only score for now
         self.cur_idx += 1
         #print('DS: __next__ 5')
-        return feat, targ
+        return torch.tensor(feat), torch.tensor(targ)
 
     def __iter__(self):
         return self

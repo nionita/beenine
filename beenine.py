@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from bbnn_dataset import BBNNDataset
 #from mmap_dataset import MemmapDataset
 
-base_dir  = 'E:\\extract\\2025\\test-1'
+base_dir  = 'C:\\data\\extract\\2025\\beenine'
 train_dir = os.path.join(base_dir, 'train')
 test_dir  = os.path.join(base_dir, 'test')
 
@@ -88,37 +88,49 @@ def loss_fn(pred, y, batch_no = 0):
     return mloss
 
 def train(device, dataloader, model, loss_fn, optimizer, num_batches=1000):
-    print(f'Begin train on {device} with {num_batches}')
+    print(f'Train on {device} with {num_batches} batches')
     #size = len(dataloader.dataset)
     start = time.time()
+    train_inst = 0
+    train_loss = 0
+    batch_report = None
     model.train()
     batch_no = 0
     for X, y in dataloader:
         batch_no += 1
+        train_inst += len(X)
+        if batch_report is None:
+            batch_report = int(200000 / train_inst)
         X, y = X.to(device), y.to(device)
         # print(f'Batch {batch_no}: {X} -> {y}')
 
         # Compute prediction error
         pred = model(X)
         loss = loss_fn(pred, y, batch_no)
+        train_loss += loss.item() * len(X)
 
         # Backpropagation
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
-        if batch_no % 1000 == 0:
+        if batch_no % batch_report == 0:
             tdiff = time.time() - start
-            spb = tdiff / (batch_no + 1)
+            ips = round(train_inst / tdiff)
             nows = time.strftime('%X %x')
-            loss, current = loss.item(), batch_no * len(X)
+            mloss = train_loss / train_inst
             size = num_batches * len(X)
-            print(f"loss: {loss:>7f} [{current:>7d}/{size:>7d}] {nows}: {spb:>6f} seconds/batch")
+            print(f"loss: {mloss:>7f} [{train_inst:>7d}/{size:>7d}] {nows}: {ips:>6d} samples/second")
+
         if batch_no >= num_batches:
-            return
+            nows = time.strftime('%X %x')
+            mloss = train_loss / train_inst
+            print(f"Epoch loss: {mloss:>7f} [{train_inst:>7d}/{train_inst:>7d}] {nows}")
+            return mloss
 
 def test(device, dataloader, model, loss_fn, num_batches=10):
     model.eval()
+    test_inst = 0
     test_loss = 0
     with torch.no_grad():
         batch_no = 0
@@ -126,10 +138,11 @@ def test(device, dataloader, model, loss_fn, num_batches=10):
             batch_no += 1
             X, y = X.to(device), y.to(device)
             pred = model(X)
-            test_loss += loss_fn(pred, y).item()
+            test_loss += loss_fn(pred, y).item() * len(X)
+            test_inst += len(X)
             if batch_no >= num_batches:
                 break
-    test_loss /= num_batches
+    test_loss /= test_inst
     print(f"Test Error Avg loss: {test_loss:>8f} \n")
     return test_loss
 
@@ -164,7 +177,8 @@ def main_train(args):
     )
     print(f"Using {device} device")
 
-    model = BBNNc()
+    # model = BBNNc()
+    model = BBNN()
     if 'restore' in args and args['restore'] is not None:
         print(f'Restore model weights from {args["restore"]}')
         model.load_state_dict(torch.load(args['restore'], weights_only=True))
@@ -178,23 +192,39 @@ def main_train(args):
     num_batches_train = int(train_pos / batch_size)
     num_batches_test  = int(test_pos / batch_size)
 
+    train_losses = []
     test_losses = []
 
     # First evaluation: completely random - for comparison
     test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
     test_losses.append(test_loss)
 
+    start = time.time()
+
     for t in range(epochs):
         print(f"Epoch {t+1} from {epochs}\n-------------------------------")
-        train(device, train_dataloader, model, loss_fn, optimizer, num_batches=num_batches_train)
+        train_loss = train(device, train_dataloader, model, loss_fn, optimizer, num_batches=num_batches_train)
+        train_losses.append(train_loss)
         save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
         test_loss = test(device, test_dataloader, model, loss_fn, num_batches=num_batches_test)
         test_losses.append(test_loss)
 
-    print(f"Test losses: {test_losses}")
-    print("Done!")
+        if t + 1 < epochs:
+            tdiff = time.time() - start
+            spe = tdiff / (t + 1)
+            rem = round((epochs - t - 1) * spe)
+            spe = round(spe)
+            print(f"{spe} seconds per epoch - {rem} seconds remaining\n-------------------------------")
+
+    print(f"Train/test losses:")
+    for i in range(len(test_losses)):
+        if i == 0:
+            trl = "        "
+        else:
+            trl = f"{train_losses[i-1]:>7f}"
+        print(f"{trl} --> {test_losses[i]:>7f}")
 
 def arg_parser():
     parser = argparse.ArgumentParser(prog='beenine', description='Train BeeNiNe')
