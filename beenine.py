@@ -20,6 +20,8 @@ WORKERS = None
 # this is necessary in order to keep weigths & biases small,
 # so we chose a scale of 1000 - see PRED_SCALE
 #
+# For the loss function we compare the sigmoid of the scores (pred vs target)
+# in order to focus more on smaller absolute scores
 # Then we need to stretch the sigmoid by the centipawn score, like:
 # for how big a score are we almost winning (sigmoid approaches to 1)?
 # Now: sigmoid(4) = 0.982
@@ -27,7 +29,6 @@ WORKERS = None
 # Then the stretch factor must be 1 / 150
 PRED_SCALE = 1000.0
 SCORE_SIGMOID_SCALE = 1.0 / 150.0
-PRED_SIGMOID_SCALE = PRED_SCALE * SCORE_SIGMOID_SCALE
 
 # For the model:
 NUM_INPUTS = 384
@@ -53,7 +54,7 @@ class BBNNc(nn.Module):
         i   = self.inte(l0)
         l1  = torch.clamp(i, 0.0, 1.0)
         y   = self.outp(l1)
-        return y
+        return y * PRED_SCALE
 
 # Define model - only test
 class BBNN(nn.Module):
@@ -66,13 +67,13 @@ class BBNN(nn.Module):
         w  = self.input(x)
         l0 = torch.clamp(w, 0.0, 1.0)
         y  = self.output(l0)
-        return y
+        return y * PRED_SCALE
 
 # Here: we don't have us, them in the features!
 def loss_fn(pred, y, batch_no = 0):
     #score, outcome = y
 
-    wdl_eval_model  = (pred * PRED_SIGMOID_SCALE).sigmoid()
+    wdl_eval_model  = (pred * SCORE_SIGMOID_SCALE).sigmoid()
     wdl_eval_target = (y    * SCORE_SIGMOID_SCALE).sigmoid()
 
     mloss = torch.abs(wdl_eval_target - wdl_eval_model).square().mean()
@@ -138,8 +139,22 @@ def test(device, dataloader, model, loss_fn):
     print(f"Test Error Avg loss: {test_loss:>8f} \n")
     return test_loss
 
+def evaluate(device, dataloader, model, num):
+    model.eval()
+    eval_inst = 0
+    with torch.no_grad():
+        batch_no = 0
+        for X in dataloader:
+            batch_no += 1
+            n = X.shape[0]
+            X = X.to(device)
+            pred = model(X)
+            print(f'Eval instances {eval_inst + 1} to {eval_inst + n}: {pred}')
+            eval_inst += n
+            if eval_inst >= num:
+                return
+
 def main_train(args):
-    print(f'{args}')
     # Training data
     training_data = BBNNDataset(args['train_dir'])
 
@@ -219,25 +234,77 @@ def main_train(args):
             trl = f"{train_losses[i-1]:>7f}"
         print(f"{trl} --> {test_losses[i]:>7f}")
 
+def main_show(args):
+    # Inference data
+    feature_data = BBNNDataset(args['feature_file'], evaluate=True, skip=args['skip'])
+
+    batch_size = min(args['batch'], args['number'])
+
+    # Create data loaders.
+    feature_dataloader = DataLoader(
+            feature_data,
+            batch_size=batch_size,
+            pin_memory=False
+        )
+
+    # Get cpu, gpu or mps device for training.
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    print(f"Using {device} device")
+
+    # model = BBNNc()
+    model = BBNN()
+    if 'model' in args and args['model'] is not None:
+        print(f'Evaluate model {args["model"]}')
+        model.load_state_dict(torch.load(args['model'], weights_only=True))
+
+    model = model.to(device)
+    print(model)
+
+    # Evaluation:
+    evaluate(device, feature_dataloader, model, args['number'])
+
 def arg_parser(config):
     parser = argparse.ArgumentParser(prog='beenine', description='Train BeeNiNe')
     subparsers = parser.add_subparsers(dest='command', help='subcommand help')
+    # Train
     parser_train = subparsers.add_parser('train', help='train the network')
-    parser_train.add_argument('-e', '--epochs', type=int, default=config.getint('DEFAULT', 'epochs', fallback=10),
+    parser_train.add_argument('-e', '--epochs', type=int,
+            default=config.getint('DEFAULT', 'epochs', fallback=10),
             help='epochs to train')
-    parser_train.add_argument('-l', '--rate', type=float, default=config.getfloat('DEFAULT', 'rate', fallback=0.001),
+    parser_train.add_argument('-l', '--rate', type=float,
+            default=config.getfloat('DEFAULT', 'rate', fallback=0.001),
             help='learning rate')
-    parser_train.add_argument('-m', '--momentum', type=float, default=config.getint('DEFAULT', 'momentum', fallback=0),
+    parser_train.add_argument('-m', '--momentum', type=float,
+            default=config.getint('DEFAULT', 'momentum', fallback=0),
             help='momentum for SGD')
-    parser_train.add_argument('-b', '--batch', type=int, default=config.getint('DEFAULT', 'batch', fallback=256),
+    parser_train.add_argument('-b', '--batch', type=int,
+            default=config.getint('DEFAULT', 'batch', fallback=256),
             help='bach size')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
     parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
-    parser_train.add_argument('-t', '--train_dir', default=config.get('DEFAULT', 'train_dir', fallback='train'),
-        help='directory with training data')
-    parser_train.add_argument('-v', '--test_dir', default=config.get('DEFAULT', 'test_dir', fallback='test'),
-        help='directory with test data')
+    parser_train.add_argument('-t', '--train_dir',
+            default=config.get('DEFAULT', 'train_dir', fallback='train'),
+            help='directory with training data')
+    parser_train.add_argument('-v', '--test_dir',
+            default=config.get('DEFAULT', 'test_dir', fallback='test'),
+            help='directory with test data')
     parser_train.set_defaults(func=main_train)
+    # Show
+    parser_show = subparsers.add_parser('show', help='show inference results')
+    parser_show.add_argument('-b', '--batch', type=int,
+            default=config.getint('DEFAULT', 'batch', fallback=256),
+            help='bach size')
+    parser_show.add_argument('-m', '--model', help='model params file')
+    parser_show.add_argument('-f', '--feature_file', help='file with features data')
+    parser_show.add_argument('-s', '--skip', type=int, default=0, help='skip samples')
+    parser_show.add_argument('-n', '--number', type=int, default=10, help='number inference samples')
+    parser_show.set_defaults(func=main_show)
     return parser
 
 def config_defaults():
