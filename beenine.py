@@ -1,5 +1,6 @@
 # vim: ts=4 sw=4 et
 
+import configparser
 import argparse
 import os.path
 import numpy as np
@@ -11,10 +12,6 @@ from torch.utils.data import DataLoader
 
 from bbnn_dataset import BBNNDataset
 #from mmap_dataset import MemmapDataset
-
-base_dir  = 'C:\\data\\extract\\2025\\beenine'
-train_dir = os.path.join(base_dir, 'train')
-test_dir  = os.path.join(base_dir, 'test')
 
 # Workers for the datasets
 WORKERS = None
@@ -142,11 +139,12 @@ def test(device, dataloader, model, loss_fn):
     return test_loss
 
 def main_train(args):
+    print(f'{args}')
     # Training data
-    training_data = BBNNDataset(train_dir)
+    training_data = BBNNDataset(args['train_dir'])
 
     # Test data
-    test_data = BBNNDataset(test_dir)
+    test_data = BBNNDataset(args['test_dir'])
 
     batch_size = args['batch']
 
@@ -221,20 +219,52 @@ def main_train(args):
             trl = f"{train_losses[i-1]:>7f}"
         print(f"{trl} --> {test_losses[i]:>7f}")
 
-def arg_parser():
+def arg_parser(config):
     parser = argparse.ArgumentParser(prog='beenine', description='Train BeeNiNe')
     subparsers = parser.add_subparsers(dest='command', help='subcommand help')
     parser_train = subparsers.add_parser('train', help='train the network')
-    parser_train.add_argument('-e', '--epochs', type=int, default=10, help='epochs to train')
-    parser_train.add_argument('-l', '--rate', type=float, default=0.001, help='learning rate')
-    parser_train.add_argument('-m', '--momentum', type=float, default=0, help='momentum for SGD')
-    parser_train.add_argument('-b', '--batch', type=int, default=256, help='bach size')
+    parser_train.add_argument('-e', '--epochs', type=int, default=config.getint('DEFAULT', 'epochs', fallback=10),
+            help='epochs to train')
+    parser_train.add_argument('-l', '--rate', type=float, default=config.getfloat('DEFAULT', 'rate', fallback=0.001),
+            help='learning rate')
+    parser_train.add_argument('-m', '--momentum', type=float, default=config.getint('DEFAULT', 'momentum', fallback=0),
+            help='momentum for SGD')
+    parser_train.add_argument('-b', '--batch', type=int, default=config.getint('DEFAULT', 'batch', fallback=256),
+            help='bach size')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
     parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
+    parser_train.add_argument('-t', '--train_dir', default=config.get('DEFAULT', 'train_dir', fallback='train'),
+        help='directory with training data')
+    parser_train.add_argument('-v', '--test_dir', default=config.get('DEFAULT', 'test_dir', fallback='test'),
+        help='directory with test data')
     parser_train.set_defaults(func=main_train)
     return parser
 
+def config_defaults():
+    base_dir  = os.path.join('E:', r'\extract', '2025', 'test-1')
+    train_dir = os.path.join(base_dir, 'train')
+    test_dir  = os.path.join(base_dir, 'test')
+
+    cds = {
+            'DEFAULT': {
+                'epochs': 10,
+                'rate': 0.001,
+                'momentum': 0,
+                'batch': 256,
+                'train_dir': train_dir,
+                'test_dir': test_dir,
+                }
+        }
+    return cds
+
+def config_parser():
+    config = configparser.ConfigParser()
+    config.read_dict(config_defaults())
+    config.read(['config.ini'])
+    return config
+
 if __name__ == '__main__':
-    parser = arg_parser()
+    config = config_parser()
+    parser = arg_parser(config)
     args = parser.parse_args()
     args.func(vars(args))
