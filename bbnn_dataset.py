@@ -5,7 +5,7 @@ import numpy as np
 import glob
 import torch
 
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, get_worker_info
 
 FEATURE_LEN = 384 * 2
 
@@ -40,15 +40,25 @@ class BBNNDataset(IterableDataset):
     #    targ = self.ds_targs[self.cur_idx][0].astype(np.float32) # only score for now
 
     def __iter__(self):
-        iterator = FileIterator(self.feat_files, self.targ_files, self.evaluate, self.skip)
+        wi = get_worker_info()
+        if wi is None:
+            print('New iterator from the dataset')
+            iterator = FileIterator(self.feat_files, self.targ_files, self.evaluate, self.skip, 0, 1)
+        else:
+            wiid = wi.id
+            winw = wi.num_workers
+            print(f'New iterator from the dataset: {wiid} / {winw}')
+            iterator = FileIterator(self.feat_files, self.targ_files, self.evaluate, self.skip, wiid, winw)
         return iterator
 
 class FileIterator():
-    def __init__(self, feature_files, target_files, evaluate, skip):
+    def __init__(self, feature_files, target_files, evaluate, skip, wid, wnum):
         self.feature_files = feature_files
         self.target_files = target_files
         self.evaluate = evaluate
         self.skip = skip
+        self.wid = wid
+        self.wnum = wnum
         self.feo_file = None
         self.tao_file = None
         self.cur_file = None
@@ -75,14 +85,19 @@ class FileIterator():
                         raise StopIteration
                     new_file = True
             if new_file:
+                if self.wnum > 1:
+                    while self.cur_file % self.wnum != self.wid:
+                        self.cur_file += 1
+                        if self.cur_file >= len(self.feature_files):
+                            raise StopIteration
                 if self.feo_file is not None:
                     self.feo_file.close()
-                print(f'Open feature file {self.feature_files[self.cur_file]}')
+                print(f'W{self.wid}: open feature file {self.cur_file}: {self.feature_files[self.cur_file]}')
                 self.feo_file = open(self.feature_files[self.cur_file], 'r')
                 if not self.evaluate:
                     if self.tao_file is not None:
                         self.tao_file.close()
-                    print(f'Open target  file {self.target_files[self.cur_file]}')
+                    print(f'W{self.wid}: open target  file {self.cur_file}: {self.target_files[self.cur_file]}')
                     self.tao_file = open(self.target_files[self.cur_file], 'r')
             else:
                 self.cur_rec += 1

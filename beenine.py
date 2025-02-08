@@ -60,14 +60,14 @@ class BBNNc(nn.Module):
 class BBNN(nn.Module):
     def __init__(self):
         super().__init__()
-        self.input  = nn.Linear(NUM_INPUTS * 2, L1)
+        self.input  = nn.Linear(NUM_INPUTS * 2, L1, bias=False)
         self.output = nn.Linear(L1, 1, bias=False)
 
     def forward(self, x):
-        w  = self.input(x)
-        l0 = torch.clamp(w, 0.0, 1.0)
-        y  = self.output(l0)
-        return y * PRED_SCALE
+        l0  = self.input(x)
+        l0n = torch.clamp(l0, 0.0, 1.0)
+        y   = self.output(l0n) * PRED_SCALE
+        return y
 
 # Here: we don't have us, them in the features!
 def loss_fn(pred, y, batch_no = 0):
@@ -167,7 +167,8 @@ def main_train(args):
     train_dataloader = DataLoader(
             training_data,
             batch_size=batch_size,
-            pin_memory=False
+            num_workers=args['workers'],
+            pin_memory=(args['workers'] > 1)
         )
     test_dataloader = DataLoader(
             test_data,
@@ -194,9 +195,9 @@ def main_train(args):
     model = model.to(device)
     print(model)
 
-    # optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
+    optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
     #optimizer = torch.optim.AdamW(model.parameters(), lr=args['rate'])
-    optimizer = torch.optim.AdamW(model.parameters())
+    # optimizer = torch.optim.AdamW(model.parameters())
 
     epochs = args['epochs']
 
@@ -288,6 +289,9 @@ def arg_parser(config):
     parser_train.add_argument('-b', '--batch', type=int,
             default=config.getint('DEFAULT', 'batch', fallback=256),
             help='bach size')
+    parser_train.add_argument('-w', '--workers', type=int,
+            default=config.getint('DEFAULT', 'workers', fallback=1),
+            help='number of dataset workers')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
     parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
     parser_train.add_argument('-t', '--train_dir',
@@ -320,6 +324,7 @@ def config_defaults():
                 'rate': 0.001,
                 'momentum': 0,
                 'batch': 256,
+                'workers': 1,
                 'train_dir': train_dir,
                 'test_dir': test_dir,
                 }
