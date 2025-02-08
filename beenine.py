@@ -32,7 +32,7 @@ SCORE_SIGMOID_SCALE = 1.0 / 150.0
 
 # For the model:
 NUM_INPUTS = 384
-L1 = 128
+L1 = 32
 L2 = 128
 
 # Define model - the correct one
@@ -99,15 +99,15 @@ def train(device, dataloader, model, loss_fn, optimizer, train_pos):
         X, y = X.to(device), y.to(device)
         # print(f'Batch {batch_no}: {X} -> {y}')
 
+        optimizer.zero_grad()
         # Compute prediction error
         pred = model(X)
         loss = loss_fn(pred, y, batch_no)
-        train_loss += loss.item() * n
 
         # Backpropagation
         loss.backward()
         optimizer.step()
-        optimizer.zero_grad()
+        train_loss += loss.item() * n
 
         if batch_no % batch_report == 0:
             tdiff = time.time() - start
@@ -194,7 +194,9 @@ def main_train(args):
     model = model.to(device)
     print(model)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
+    # optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
+    #optimizer = torch.optim.AdamW(model.parameters(), lr=args['rate'])
+    optimizer = torch.optim.AdamW(model.parameters())
 
     epochs = args['epochs']
 
