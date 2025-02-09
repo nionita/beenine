@@ -82,8 +82,7 @@ def loss_fn(pred, y):
     return mloss
 
 # A loss function to check the learning
-def loss_fn_mse(pred, y):
-    #mloss = torch.abs(pred - y).square().mean()
+def loss_fn_mad(pred, y):
     mloss = torch.abs(pred - y).mean()
     return mloss
 
@@ -222,8 +221,8 @@ def main_train(args):
     model = model.to(device)
     print(model)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args['rate'], momentum=args['momentum'])
-    #optimizer = torch.optim.AdamW(model.parameters(), lr=args['rate'])
+    optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=args['momentum'])
+    #optimizer = torch.optim.AdamW(model.parameters(), lr=args['lr'])
     # optimizer = torch.optim.AdamW(model.parameters())
 
     epochs = args['epochs']
@@ -233,8 +232,8 @@ def main_train(args):
     test_corres = []
 
     # First evaluation: completely random - for comparison
-    #test_loss = test(device, test_dataloader, model, loss_fn)
-    test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mse)
+    test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
+    #test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
     test_losses.append(test_loss)
     test_corres.append(test_corr)
 
@@ -243,14 +242,14 @@ def main_train(args):
 
     for t in range(epochs):
         print(f"Epoch {t+1} from {epochs}\n-------------------------------")
-        #train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
-        train_pos, train_loss = train(device, train_dataloader, model, loss_fn_mse, optimizer, train_pos)
+        train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
+        #train_pos, train_loss = train(device, train_dataloader, model, loss_fn_mad, optimizer, train_pos)
         train_losses.append(train_loss)
         save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
-        #test_loss = test(device, test_dataloader, model, loss_fn)
-        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mse)
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
+        #test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
         test_losses.append(test_loss)
         test_corres.append(test_corr)
 
@@ -313,8 +312,8 @@ def arg_parser(config):
     parser_train.add_argument('-e', '--epochs', type=int,
             default=config.getint('DEFAULT', 'epochs', fallback=10),
             help='epochs to train')
-    parser_train.add_argument('-l', '--rate', type=float,
-            default=config.getfloat('DEFAULT', 'rate', fallback=0.001),
+    parser_train.add_argument('-l', '--lr', type=float,
+            default=config.getfloat('DEFAULT', 'lr', fallback=0.001),
             help='learning rate')
     parser_train.add_argument('-m', '--momentum', type=float,
             default=config.getint('DEFAULT', 'momentum', fallback=0),
@@ -354,7 +353,7 @@ def config_defaults():
     cds = {
             'DEFAULT': {
                 'epochs': 10,
-                'rate': 0.001,
+                'lr': 0.001,
                 'momentum': 0,
                 'batch': 256,
                 'workers': 1,
