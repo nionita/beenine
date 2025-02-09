@@ -81,7 +81,7 @@ def loss_fn(pred, y):
     #    print(f'wdl_eval: model = {wdl_eval_model} target = {wdl_eval_target}')
     return mloss
 
-# A loss function to check the learning
+# A loss function to accelerate the beginning
 def loss_fn_mad(pred, y):
     mloss = torch.abs(pred - y).mean()
     return mloss
@@ -232,8 +232,10 @@ def main_train(args):
     test_corres = []
 
     # First evaluation: completely random - for comparison
-    test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
-    #test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
+    if args['mad'] > 0:
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
+    else:
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
     test_losses.append(test_loss)
     test_corres.append(test_corr)
 
@@ -242,14 +244,18 @@ def main_train(args):
 
     for t in range(epochs):
         print(f"Epoch {t+1} from {epochs}\n-------------------------------")
-        train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
-        #train_pos, train_loss = train(device, train_dataloader, model, loss_fn_mad, optimizer, train_pos)
+        if t < args['mad']:
+            train_pos, train_loss = train(device, train_dataloader, model, loss_fn_mad, optimizer, train_pos)
+        else:
+            train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
         train_losses.append(train_loss)
         save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
-        test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
-        #test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
+        if t < args['mad']:
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
+        else:
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
         test_losses.append(test_loss)
         test_corres.append(test_corr)
 
@@ -324,6 +330,9 @@ def arg_parser(config):
     parser_train.add_argument('-w', '--workers', type=int,
             default=config.getint('DEFAULT', 'workers', fallback=1),
             help='number of dataset workers')
+    parser_train.add_argument('-m', '--mad', type=int,
+            default=config.getint('DEFAULT', 'mad', fallback=0),
+            help='number of epochs mit MAD loss')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
     parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
     parser_train.add_argument('-t', '--train_dir',
@@ -357,6 +366,7 @@ def config_defaults():
                 'momentum': 0,
                 'batch': 256,
                 'workers': 1,
+                'mad': 0,
                 'train_dir': train_dir,
                 'test_dir': test_dir,
                 }
