@@ -13,9 +13,6 @@ from torch.utils.data import DataLoader
 from bbnn_dataset import BBNNDataset
 #from mmap_dataset import MemmapDataset
 
-# Workers for the datasets
-WORKERS = None
-
 # Why do we need to scale the network score prediction? It seems that
 # this is necessary in order to keep weigths & biases small,
 # so we chose a scale of 1000 - see PRED_SCALE
@@ -34,6 +31,8 @@ SCORE_SIGMOID_SCALE = 1.0 / 150.0
 NUM_INPUTS = 384
 L1 = 32
 L2 = 128
+
+debug = False
 
 # Define model - the correct one
 class BBNNc(nn.Module):
@@ -60,17 +59,18 @@ class BBNNc(nn.Module):
 class BBNN(nn.Module):
     def __init__(self):
         super().__init__()
-        self.input  = nn.Linear(NUM_INPUTS * 2, L1, bias=False)
-        self.output = nn.Linear(L1, 1, bias=False)
+        self.stack = nn.Sequential(
+            nn.Linear(NUM_INPUTS * 2, L1),
+            nn.ReLU(),
+            nn.Linear(L1, 1)
+        )
 
     def forward(self, x):
-        l0  = self.input(x)
-        l0n = torch.clamp(l0, 0.0, 1.0)
-        y   = self.output(l0n) * PRED_SCALE
-        return y
+        pred = self.stack(x)
+        return pred.squeeze()
 
-# Here: we don't have us, them in the features!
-def loss_fn(pred, y, batch_no = 0):
+# The correct loss function
+def loss_fn(pred, y):
     #score, outcome = y
 
     wdl_eval_model  = (pred * SCORE_SIGMOID_SCALE).sigmoid()
@@ -79,7 +79,12 @@ def loss_fn(pred, y, batch_no = 0):
     mloss = torch.abs(wdl_eval_target - wdl_eval_model).square().mean()
     #if (batch_no + 1) % 100 == 0:
     #    print(f'wdl_eval: model = {wdl_eval_model} target = {wdl_eval_target}')
+    return mloss
 
+# A loss function to check the learning
+def loss_fn_mse(pred, y):
+    #mloss = torch.abs(pred - y).square().mean()
+    mloss = torch.abs(pred - y).mean()
     return mloss
 
 def train(device, dataloader, model, loss_fn, optimizer, train_pos):
@@ -102,7 +107,7 @@ def train(device, dataloader, model, loss_fn, optimizer, train_pos):
         optimizer.zero_grad()
         # Compute prediction error
         pred = model(X)
-        loss = loss_fn(pred, y, batch_no)
+        loss = loss_fn(pred, y)
 
         # Backpropagation
         loss.backward()
@@ -124,20 +129,39 @@ def train(device, dataloader, model, loss_fn, optimizer, train_pos):
 def test(device, dataloader, model, loss_fn):
     model.eval()
     test_inst = 0
-    test_loss = 0
+    test_loss = 0.0
+    test_corr = 0
     with torch.no_grad():
         batch_no = 0
         for X, y in dataloader:
             batch_no += 1
             n = X.shape[0]
+            test_inst += n
             X, y = X.to(device), y.to(device)
             pred = model(X)
             test_loss += loss_fn(pred, y).item() * n
-            test_inst += n
+            test_corr += accuracy(pred, y)
+            if debug:
+                # Test:
+                exit()
 
+    print(f"Debug loss/corr/inst: {test_loss:>8f} / {test_corr} / {test_inst}")
     test_loss /= test_inst
-    print(f"Test Error Avg loss: {test_loss:>8f} \n")
-    return test_loss
+    test_corr /= test_inst
+    print(f"Test Error Avg loss: {test_loss:>8f} accuracy: {test_corr}\n")
+    return test_loss, test_corr
+
+def accuracy(pred, y):
+    diff = torch.abs(pred - y)
+    dibo = diff < 25
+    corr = torch.sum(dibo)
+    if debug:
+        print(f"debug accuracy: pred = {pred.shape} {pred}")
+        print(f"debug accuracy: y    = {y.shape} {y}")
+        print(f"debug accuracy: diff = {diff.shape} {diff}")
+        print(f"debug accuracy: dibo = {dibo.shape} {dibo}")
+        print(f"debug accuracy: corr = {corr.shape} {corr}")
+    return corr.item()
 
 def evaluate(device, dataloader, model, num):
     model.eval()
@@ -155,6 +179,9 @@ def evaluate(device, dataloader, model, num):
                 return
 
 def main_train(args):
+    print('Training args:')
+    print(args)
+
     # Training data
     training_data = BBNNDataset(args['train_dir'])
 
@@ -203,23 +230,29 @@ def main_train(args):
 
     train_losses = []
     test_losses = []
+    test_corres = []
 
     # First evaluation: completely random - for comparison
-    test_loss = test(device, test_dataloader, model, loss_fn)
+    #test_loss = test(device, test_dataloader, model, loss_fn)
+    test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mse)
     test_losses.append(test_loss)
+    test_corres.append(test_corr)
 
     train_pos = 0
     start = time.time()
 
     for t in range(epochs):
         print(f"Epoch {t+1} from {epochs}\n-------------------------------")
-        train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
+        #train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
+        train_pos, train_loss = train(device, train_dataloader, model, loss_fn_mse, optimizer, train_pos)
         train_losses.append(train_loss)
         save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
-        test_loss = test(device, test_dataloader, model, loss_fn)
+        #test_loss = test(device, test_dataloader, model, loss_fn)
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mse)
         test_losses.append(test_loss)
+        test_corres.append(test_corr)
 
         tdiff = time.time() - start
         spe = tdiff / (t + 1)
@@ -232,10 +265,10 @@ def main_train(args):
     print(f"Train/test losses:")
     for i in range(len(test_losses)):
         if i == 0:
-            trl = "        "
+            trl = "          "
         else:
-            trl = f"{train_losses[i-1]:>7f}"
-        print(f"{trl} --> {test_losses[i]:>7f}")
+            trl = f"{train_losses[i-1]:>9f}"
+        print(f"{trl} --> {test_losses[i]:>9f} + {test_corres[i]:>9f}")
 
 def main_show(args):
     # Inference data
