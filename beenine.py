@@ -29,7 +29,7 @@ SCORE_SIGMOID_SCALE = 1.0 / 150.0
 
 # For the model:
 NUM_INPUTS = 384
-L1 = 32
+L1 = 64
 L2 = 128
 
 debug = False
@@ -330,7 +330,7 @@ def arg_parser(config):
     parser_train.add_argument('-w', '--workers', type=int,
             default=config.getint('DEFAULT', 'workers', fallback=1),
             help='number of dataset workers')
-    parser_train.add_argument('-m', '--mad', type=int,
+    parser_train.add_argument('--mad', type=int,
             default=config.getint('DEFAULT', 'mad', fallback=0),
             help='number of epochs mit MAD loss')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
