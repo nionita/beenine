@@ -8,3 +8,4 @@ config.ini
 *.txt
 *.pth
 *.epd
+*.hs

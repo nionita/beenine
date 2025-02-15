@@ -29,7 +29,7 @@ SCORE_SIGMOID_SCALE = 1.0 / 150.0
 
 # For the model:
 NUM_INPUTS = 384
-L1 = 12
+L1 = 16
 L2 = 16
 
 debug = False
@@ -63,7 +63,7 @@ class BBNN(nn.Module):
             nn.Linear(NUM_INPUTS * 2, L1),
             nn.Hardsigmoid(),
             nn.Linear(L1, L2),
-            nn.Hardsigmoid(),
+            nn.ReLU(),
             nn.Linear(L2, 1)
         )
 
