@@ -188,6 +188,8 @@ def evaluate(device, dataloader, model, num):
         batch_no = 0
         for X in dataloader:
             batch_no += 1
+            #print(f'Eval: input shape = {X.shape}')
+            #print(f'Eval: input = {X}')
             n = X.shape[0]
             X = X.to(device)
             pred = model(X)
@@ -241,8 +243,9 @@ def main_train(args):
     layers = list(map(int, args['intermediates'].split(',')))
     model = BBNN(*layers)
     if 'restore' in args and args['restore'] is not None:
-        print(f'Restore model weights from {args["restore"]}')
-        model.load_state_dict(torch.load(args['restore'], weights_only=True))
+        restore_file = f'{args["restore"]}.pth'
+        print(f'Restore model weights from {restore_file}')
+        model.load_state_dict(torch.load(restore_file, weights_only=True))
 
     model = model.to(device)
     print(model)
@@ -314,7 +317,8 @@ def main_train(args):
 
 def main_show(args):
     # Inference data
-    feature_data = BBNNDataset(args['feature_file'], evaluate=True, skip=args['skip'])
+    feature_file = f'{args["feature_file"]}.txt'
+    feature_data = BBNNDataset(feature_file, evaluate=True, skip=args['skip'])
 
     batch_size = min(args['batch'], args['number'])
 
@@ -339,8 +343,9 @@ def main_show(args):
     layers = list(map(int, args['intermediates'].split(',')))
     model = BBNN(*layers)
     if 'model' in args and args['model'] is not None:
-        print(f'Evaluate model {args["model"]}')
-        model.load_state_dict(torch.load(args['model'], weights_only=True))
+        model_file = f'{args["model"]}.pth'
+        print(f'Evaluate model {model_file}')
+        model.load_state_dict(torch.load(model_file, weights_only=True))
 
     model = model.to(device)
     print(model)
@@ -376,12 +381,12 @@ def arg_parser(config):
     parser_train.add_argument('--mad', type=int,
             default=config.getint('DEFAULT', 'mad', fallback=0),
             help='number of epochs mit MAD loss')
-    parser_train.add_argument('-r', '--restore', help='restore model params from file')
+    parser_train.add_argument('-r', '--restore', help='restore model params from file (without extension)')
     parser_train.add_argument('-z', '--rezult', action='store_const', const=True,
             default=False, help='use game rezult as target')
     parser_train.add_argument('-a', '--adamw', action='store_const', const=True,
             default=False, help='use AdamW as optimizer')
-    parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
+    parser_train.add_argument('-s', '--save', default='model', help='model name to save save model params')
     parser_train.add_argument('-t', '--train_dir',
             default=config.get('DEFAULT', 'train_dir', fallback='train'),
             help='directory with training data')
@@ -394,10 +399,10 @@ def arg_parser(config):
     parser_show.add_argument('-b', '--batch', type=int,
             default=config.getint('DEFAULT', 'batch', fallback=256),
             help='bach size')
-    parser_show.add_argument('-m', '--model', help='model params file')
+    parser_show.add_argument('-m', '--model', help='model params file (without extension)')
     parser_show.add_argument('-i', '--intermediates',
             help='intermediate layers of the model (comma separated list of neurons per layer)')
-    parser_show.add_argument('-f', '--feature_file', help='file with features data')
+    parser_show.add_argument('-f', '--feature_file', help='file with features data (without extension)')
     parser_show.add_argument('-s', '--skip', type=int, default=0, help='skip samples')
     parser_show.add_argument('-n', '--number', type=int, default=10, help='number inference samples')
     parser_show.set_defaults(func=main_show)
