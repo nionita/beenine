@@ -336,7 +336,8 @@ def main_show(args):
     print(f"Using {device} device")
 
     # model = BBNNc()
-    model = BBNN()
+    layers = list(map(int, args['intermediates'].split(',')))
+    model = BBNN(*layers)
     if 'model' in args and args['model'] is not None:
         print(f'Evaluate model {args["model"]}')
         model.load_state_dict(torch.load(args['model'], weights_only=True))
@@ -394,6 +395,8 @@ def arg_parser(config):
             default=config.getint('DEFAULT', 'batch', fallback=256),
             help='bach size')
     parser_show.add_argument('-m', '--model', help='model params file')
+    parser_show.add_argument('-i', '--intermediates',
+            help='intermediate layers of the model (comma separated list of neurons per layer)')
     parser_show.add_argument('-f', '--feature_file', help='file with features data')
     parser_show.add_argument('-s', '--skip', type=int, default=0, help='skip samples')
     parser_show.add_argument('-n', '--number', type=int, default=10, help='number inference samples')
