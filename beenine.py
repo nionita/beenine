@@ -238,7 +238,8 @@ def main_train(args):
     print(f"Using {device} device")
 
     # model = BBNNc()
-    model = BBNN(10, 16)
+    layers = list(map(int, args['intermediates'].split(',')))
+    model = BBNN(*layers)
     if 'restore' in args and args['restore'] is not None:
         print(f'Restore model weights from {args["restore"]}')
         model.load_state_dict(torch.load(args['restore'], weights_only=True))
@@ -251,7 +252,7 @@ def main_train(args):
     else:
         optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=args['momentum'])
 
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args['gamma'])
     epochs = args['epochs']
 
     train_losses = []
@@ -351,12 +352,17 @@ def arg_parser(config):
     subparsers = parser.add_subparsers(dest='command', help='subcommand help')
     # Train
     parser_train = subparsers.add_parser('train', help='train the network')
+    parser_train.add_argument('-i', '--intermediates', default='64',
+            help='intermediate layers of the model (comma separated list of neurons per layer)')
     parser_train.add_argument('-e', '--epochs', type=int,
             default=config.getint('DEFAULT', 'epochs', fallback=10),
             help='epochs to train')
     parser_train.add_argument('-l', '--lr', type=float,
             default=config.getfloat('DEFAULT', 'lr', fallback=0.001),
             help='learning rate')
+    parser_train.add_argument('-g', '--gamma', type=float,
+            default=config.getfloat('DEFAULT', 'gamma', fallback=0.95),
+            help='gamma for learning rate decay')
     parser_train.add_argument('-m', '--momentum', type=float,
             default=config.getint('DEFAULT', 'momentum', fallback=0),
             help='momentum for SGD')
