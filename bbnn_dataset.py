@@ -10,9 +10,10 @@ from torch.utils.data import IterableDataset, get_worker_info
 FEATURE_LEN = 384 * 2
 
 class BBNNDataset(IterableDataset):
-    def __init__(self, data_dir, evaluate=False, skip=0):
+    def __init__(self, data_dir, rezult_target=False, evaluate=False, skip=0):
         super(BBNNDataset).__init__()
 
+        self.rezult_target = rezult_target  # default: score
         self.evaluate = evaluate
         self.skip = skip
 
@@ -43,22 +44,25 @@ class BBNNDataset(IterableDataset):
         wi = get_worker_info()
         if wi is None:
             print('New iterator from the dataset')
-            iterator = FileIterator(self.feat_files, self.targ_files, self.evaluate, self.skip, 0, 1)
+            iterator = FileIterator(self.feat_files, self.targ_files, self.rezult_target,
+                    self.evaluate, self.skip, 0, 1)
         else:
             wiid = wi.id
             winw = wi.num_workers
             print(f'New iterator from the dataset: {wiid} / {winw}')
-            iterator = FileIterator(self.feat_files, self.targ_files, self.evaluate, self.skip, wiid, winw)
+            iterator = FileIterator(self.feat_files, self.targ_files, self.rezult_target,
+                    self.evaluate, self.skip, wiid, winw)
         return iterator
 
 class FileIterator():
-    def __init__(self, feature_files, target_files, evaluate, skip, wid, wnum):
+    def __init__(self, feature_files, target_files, rezult_target, evaluate, skip, wid, wnum):
         self.feature_files = feature_files
         self.target_files = target_files
+        self.target_idx = 1 if rezult_target else 0
         self.evaluate = evaluate
         self.skip = skip
-        self.wid = wid
-        self.wnum = wnum
+        self.wid = wid      # worker id
+        self.wnum = wnum    # number of workers
         self.feo_file = None
         self.tao_file = None
         self.cur_file = None
@@ -111,7 +115,7 @@ class FileIterator():
         if self.evaluate:
             return torch.as_tensor(feat)
         else:
-            targ = np.fromstring(ta_line, dtype=np.float32, sep=',')[0]
+            targ = np.fromstring(ta_line, dtype=np.float32, sep=',')[self.target_idx]
             return torch.as_tensor(feat), torch.as_tensor(targ)
 
 if __name__ == '__main__':

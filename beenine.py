@@ -34,7 +34,7 @@ L2 = 16
 
 debug = False
 
-# Define model - the correct one
+# Define model - the correct one (?)
 class BBNNc(nn.Module):
     def __init__(self):
         super().__init__()
@@ -55,26 +55,30 @@ class BBNNc(nn.Module):
         y   = self.outp(l1)
         return y * PRED_SCALE
 
-# Define model - only test
+# Define a parametrized model
+# We fix the non linearity for the moment to be only ReLU,
+# so the model is made only of Linear and ReLU modules
+# We give as parameters the number of neurons of every intermediate layer
+# The input has dimension NUM_INPUTS * 2 and the output 1
 class BBNN(nn.Module):
-    def __init__(self):
+    def __init__(self, *neurons):
         super().__init__()
-        self.stack = nn.Sequential(
-            nn.Linear(NUM_INPUTS * 2, L1),
-            nn.Hardsigmoid(),
-            nn.Linear(L1, L2),
-            nn.ReLU(),
-            nn.Linear(L2, 1)
-        )
+        assert len(neurons) > 0
+        layers = [ nn.Linear(NUM_INPUTS * 2, neurons[0]), nn.ReLU() ]
+        i = 0
+        while i < len(neurons) - 1:
+            layers.append(nn.Linear(neurons[i], neurons[i+1]))
+            layers.append(nn.ReLU())
+            i += 1
+        layers.append(nn.Linear(neurons[i], 1))
+        self.stack = nn.Sequential(*layers)
 
     def forward(self, x):
         pred = self.stack(x)
         return pred.squeeze()
 
-# The correct loss function
-def loss_fn(pred, y):
-    #score, outcome = y
-
+# The correct loss function for scores
+def loss_fn_score(pred, y):
     wdl_eval_model  = (pred * SCORE_SIGMOID_SCALE).sigmoid()
     wdl_eval_target = (y    * SCORE_SIGMOID_SCALE).sigmoid()
 
@@ -86,6 +90,15 @@ def loss_fn(pred, y):
 # A loss function to accelerate the beginning
 def loss_fn_mad(pred, y):
     mloss = torch.abs(pred - y).mean()
+    return mloss
+
+# The loss function for rezults
+# Rezults are 0, 1 or 2, meaning: lost, draw, win
+def loss_fn_rezult(pred, y):
+    outcome_model  = (pred * SCORE_SIGMOID_SCALE).sigmoid()
+    outcome_target = y / 2.0
+
+    mloss = torch.abs(outcome_target - outcome_model).square().mean()
     return mloss
 
 def train(device, dataloader, model, loss_fn, optimizer, train_pos):
@@ -183,11 +196,16 @@ def main_train(args):
     print('Training args:')
     print(args)
 
+    if 'rezult' in args and args['rezult']:
+        rezult_target = True
+    else:
+        rezult_target = False
+
     # Training data
-    training_data = BBNNDataset(args['train_dir'])
+    training_data = BBNNDataset(args['train_dir'], rezult_target=rezult_target)
 
     # Test data
-    test_data = BBNNDataset(args['test_dir'])
+    test_data = BBNNDataset(args['test_dir'], rezult_target=rezult_target)
 
     batch_size = args['batch']
 
@@ -215,7 +233,7 @@ def main_train(args):
     print(f"Using {device} device")
 
     # model = BBNNc()
-    model = BBNN()
+    model = BBNN(10, 16)
     if 'restore' in args and args['restore'] is not None:
         print(f'Restore model weights from {args["restore"]}')
         model.load_state_dict(torch.load(args['restore'], weights_only=True))
@@ -234,10 +252,12 @@ def main_train(args):
     test_corres = []
 
     # First evaluation: completely random - for comparison
-    if args['mad'] > 0:
+    if args['rezult']:
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_rezult)
+    elif args['mad'] > 0:
         test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
     else:
-        test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_score)
     test_losses.append(test_loss)
     test_corres.append(test_corr)
 
@@ -246,18 +266,22 @@ def main_train(args):
 
     for t in range(epochs):
         print(f"Epoch {t+1} from {epochs}\n-------------------------------")
-        if t < args['mad']:
+        if args['rezult']:
+            train_pos, train_loss = train(device, train_dataloader, model, loss_fn_rezult, optimizer, train_pos)
+        elif t < args['mad']:
             train_pos, train_loss = train(device, train_dataloader, model, loss_fn_mad, optimizer, train_pos)
         else:
-            train_pos, train_loss = train(device, train_dataloader, model, loss_fn, optimizer, train_pos)
+            train_pos, train_loss = train(device, train_dataloader, model, loss_fn_score, optimizer, train_pos)
         train_losses.append(train_loss)
         save_name = f"{args['save']}-{t}.pth"
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
-        if t < args['mad']:
+        if args['rezult']:
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_rezult)
+        elif t < args['mad']:
             test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
         else:
-            test_loss, test_corr = test(device, test_dataloader, model, loss_fn)
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_score)
         test_losses.append(test_loss)
         test_corres.append(test_corr)
 
@@ -336,6 +360,7 @@ def arg_parser(config):
             default=config.getint('DEFAULT', 'mad', fallback=0),
             help='number of epochs mit MAD loss')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
+    parser_train.add_argument('--rezult', type=bool, default=False, help='use game rezult as target')
     parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
     parser_train.add_argument('-t', '--train_dir',
             default=config.get('DEFAULT', 'train_dir', fallback='train'),
