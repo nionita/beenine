@@ -140,7 +140,7 @@ def train(device, dataloader, model, loss_fn, optimizer, train_pos):
     print(f"Epoch loss: {mloss:>7f} [{train_inst:>7d}/{train_inst:>7d}] {nows}")
     return train_inst, mloss
 
-def test(device, dataloader, model, loss_fn):
+def test(device, dataloader, model, loss_fn, test_accuracy):
     model.eval()
     test_inst = 0
     test_loss = 0.0
@@ -154,15 +154,19 @@ def test(device, dataloader, model, loss_fn):
             X, y = X.to(device), y.to(device)
             pred = model(X)
             test_loss += loss_fn(pred, y).item() * n
-            test_corr += accuracy(pred, y)
+            if test_accuracy:
+                test_corr += accuracy(pred, y)
             if debug:
                 # Test:
                 exit()
 
     print(f"Debug loss/corr/inst: {test_loss:>8f} / {test_corr} / {test_inst}")
     test_loss /= test_inst
-    test_corr /= test_inst
-    print(f"Test Error Avg loss: {test_loss:>8f} accuracy: {test_corr}\n")
+    if test_accuracy:
+        test_corr /= test_inst
+        print(f"Test Error Avg loss: {test_loss:>8f} accuracy: {test_corr}\n")
+    else:
+        print(f"Test Error Avg loss: {test_loss:>8f}\n")
     return test_loss, test_corr
 
 def accuracy(pred, y):
@@ -219,7 +223,8 @@ def main_train(args):
     test_dataloader = DataLoader(
             test_data,
             batch_size=batch_size,
-            pin_memory=False
+            num_workers=args['workers'],
+            pin_memory=(args['workers'] > 1)
         )
 
     # Get cpu, gpu or mps device for training.
@@ -241,10 +246,12 @@ def main_train(args):
     model = model.to(device)
     print(model)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=args['momentum'])
-    #optimizer = torch.optim.AdamW(model.parameters(), lr=args['lr'])
-    # optimizer = torch.optim.AdamW(model.parameters())
+    if args['adamw']:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args['lr'], weight_decay=0.0)
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), lr=args['lr'], momentum=args['momentum'])
 
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
     epochs = args['epochs']
 
     train_losses = []
@@ -253,11 +260,11 @@ def main_train(args):
 
     # First evaluation: completely random - for comparison
     if args['rezult']:
-        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_rezult)
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_rezult, test_accuracy=False)
     elif args['mad'] > 0:
-        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad, test_accuracy=True)
     else:
-        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_score)
+        test_loss, test_corr = test(device, test_dataloader, model, loss_fn_score, test_accuracy=True)
     test_losses.append(test_loss)
     test_corres.append(test_corr)
 
@@ -277,11 +284,11 @@ def main_train(args):
         torch.save(model.state_dict(), save_name)
         print(f"Saved PyTorch Model State to {save_name}")
         if args['rezult']:
-            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_rezult)
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_rezult, test_accuracy=False)
         elif t < args['mad']:
-            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad)
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_mad, test_accuracy=True)
         else:
-            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_score)
+            test_loss, test_corr = test(device, test_dataloader, model, loss_fn_score, test_accuracy=True)
         test_losses.append(test_loss)
         test_corres.append(test_corr)
 
@@ -289,8 +296,11 @@ def main_train(args):
         spe = tdiff / (t + 1)
         rem = round((epochs - t - 1) * spe)
         if t + 1 < epochs:
+            scheduler.step()
+            lr = scheduler.get_last_lr()
             spe = round(spe)
-            print(f"{spe} seconds per epoch - {rem} seconds remaining\n-------------------------------")
+            print(f"{spe} seconds per epoch - {rem} seconds remaining - lr = {lr}")
+            print(f"-------------------------------------------------------")
 
     print(f"Done after {tdiff} seconds")
     print(f"Train/test losses:")
@@ -360,7 +370,10 @@ def arg_parser(config):
             default=config.getint('DEFAULT', 'mad', fallback=0),
             help='number of epochs mit MAD loss')
     parser_train.add_argument('-r', '--restore', help='restore model params from file')
-    parser_train.add_argument('--rezult', type=bool, default=False, help='use game rezult as target')
+    parser_train.add_argument('-z', '--rezult', action='store_const', const=True,
+            default=False, help='use game rezult as target')
+    parser_train.add_argument('-a', '--adamw', action='store_const', const=True,
+            default=False, help='use AdamW as optimizer')
     parser_train.add_argument('-s', '--save', default='model', help='save model params to file')
     parser_train.add_argument('-t', '--train_dir',
             default=config.get('DEFAULT', 'train_dir', fallback='train'),
