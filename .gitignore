@@ -9,3 +9,4 @@ config.ini
 *.pth
 *.epd
 *.hs
+*.json
